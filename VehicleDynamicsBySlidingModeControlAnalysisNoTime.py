@@ -27,7 +27,7 @@ total_x = 0
 #
 def vehicle_update(t, x, u, params):
     # Get the parameters for the model
-    l = params.get('wheelbase', 2.6)         # vehicle wheelbase
+    l = params.get('wheelbase', 3.)         # vehicle wheelbase
     delta_max = params.get('maxsteer', 0.5)    # max steering angle (rad)
 
     # Saturate the steering input
@@ -35,8 +35,9 @@ def vehicle_update(t, x, u, params):
 
     # Return the derivative of the state
     return np.array([
-        np.cos(x[2]) * u[0],            # xdot = cos(psi) v
-        np.sin(x[2]) * u[0],            # ydot = sin(psi) v
+        -1.,            # xdot = cos(psi) v
+        -np.tan(x[3]),            # ydot = sin(psi) v
+        -np.tan(x[3])/(l*np.cos(x[3]))
         (u[0] / l) * np.tan(delta)        # delta_dot = v/l tan(delta)
     ])
 
@@ -59,7 +60,7 @@ def Sat(x):
     val = 0;
     if x >= Delta:
         val = 1
-    elif x <= -Delta:
+    elif x <= Delta:
         val = -1
     else:
         val = x/Delta
@@ -70,7 +71,7 @@ def Sat(x):
 # System output: v, delta
 # System parameters: l
 def control_output(t, x, u, params):
-    l = params.get('wheelbase', 2.6)
+    l = params.get('wheelbase', 3)
     
     x2 = np.tan(u[4]) - np.tan(u[3])
     x1 = u[1]
@@ -103,7 +104,7 @@ def TargetLineSecondDerivative(x):
 # System parameters: none
 #
 def target_output(t, x, u, params):
-    l = params.get('wheelbase', 2.6)
+    l = params.get('wheelbase', 3)
     
     y_r = TargetLine(u[0])
     psi_ref = np.arctan(TargetLineFirstDerivative(u[0]))
@@ -150,7 +151,7 @@ LatSlidingModeControl = ct.InterconnectedSystem(
 # time of response
 T = np.linspace(0, 50, 1000)
 # the response
-tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,4.8,0.35])
+tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,5,0])
 
 target_y = []
 target_psi = []
@@ -179,7 +180,6 @@ plt.title('phase')
 plt.xlabel('x1[m]')
 plt.ylabel('x2[m]')
 plt.plot(x1,x2)
-plt.plot([-1,1],[c,-c])
  
 plt.figure()
 plt.title('Tracking')
@@ -216,26 +216,14 @@ plt.figure()
 plt.xlabel('x[m]')
 plt.title('curvature')
 plt.plot(yout[0],targte_curvature)
-
-
-x = np.linspace(-1.0,1.0,1000)
-sigmoid_y = []
-for i in x:
-    sigmoid_y.append(Sigmoid(i))
-plt.figure()
-plt.title("Sigmoid Function")
-plt.xlabel("sigma")
-plt.grid()
-plt.plot(x,sigmoid_y)
-
-sat_y = []
-for i in x:
-    sat_y.append(Sat(i))
-plt.figure()
-plt.title("Sat Function")
-plt.xlabel("Sat")
-plt.grid()
-plt.plot(x,sat_y)
+#x = np.linspace(-1.0,1.0,1000)
+#y = []
+#for i in x:
+#    y.append(i/(np.fabs(i) + eps))
+#plt.figure()
+#plt.title("Sigmoid Function")
+#plt.xlabel("sigma")
+#plt.plot(x,y)
 
 #plt.figure()
 #plt.title("Sliding Variable")
