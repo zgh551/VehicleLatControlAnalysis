@@ -9,16 +9,24 @@ import numpy as np
 import control as ct
 import matplotlib.pyplot as plt
 
-c = 24
+c = 12
 rho = 0.01
 k = 1.0
 
 eps = 0.001
 Delta = 0.05
 
-vref = -2
+vref = -1
+delta_rate = 8.0
 
 total_x = 0
+
+p1 = -1.478
+p2 =  36.5
+p3 = -358.6
+p4 =  1752
+p5 = -4257
+p6 =  4128
 
 # System state: x, y, psi
 # System input: v, delta
@@ -37,7 +45,7 @@ def vehicle_update(t, x, u, params):
     return np.array([
         np.cos(x[2]) * u[0],            # xdot = cos(psi) v
         np.sin(x[2]) * u[0],            # ydot = sin(psi) v
-        (u[0] / l) * np.tan(delta)        # delta_dot = v/l tan(delta)
+        (u[0] / l) * np.tan(delta)      # delta_dot = v/l tan(delta)
     ])
 
 def vehicle_output(t, x, u, params):
@@ -66,7 +74,7 @@ def Sat(x):
     return val
 #
 # System state: none
-# System input: v_r,ey,delta_r,psi_r,psi
+# System input: v_r,ey,delta_r,psi_r,psi,last_delta
 # System output: v, delta
 # System parameters: l
 def control_output(t, x, u, params):
@@ -76,6 +84,7 @@ def control_output(t, x, u, params):
     x1 = u[1]
     s = c*x1 + x2
     c_delta = np.arctan(l*np.power(np.cos(u[4]),3)*(np.tan(u[2])/(l*np.power(np.cos(u[3]),3)) + c*x2 + rho*Sat(s) + k*s ))
+    
     return  np.array([u[0] + 0.0*np.sin(5*t),c_delta])
 
 # Define the controller as an input/output system
@@ -89,13 +98,26 @@ controller = ct.NonlinearIOSystem(
 # Target
 ###############################################################################
 def TargetLine(x):
-    return np.sin(0.4*x) + 5
+    return np.sqrt(25 - np.power(x,2))
 
 def TargetLineFirstDerivative(x):
-    return 0.4*np.cos(0.4*x)
+    return -x/np.sqrt(25 - np.power(x,2))
 
 def TargetLineSecondDerivative(x):
-    return -0.16*np.sin(0.4*x)
+    return -25.0*np.power((25 - np.power(x,2)),-1.5)
+
+## zhl target line
+    
+#def TargetLine(x):
+#    return p1*np.power(x,5) + p2*np.power(x,4) + p3*np.power(x,3) + p4*np.power(x,2) + p5*x + p6
+#
+#def TargetLineFirstDerivative(x):
+#    return 5*p1*np.power(x,4) + 4*p2*np.power(x,3) + 3*p3*np.power(x,2) + 2*p4*x + p5
+#
+#def TargetLineSecondDerivative(x):
+#    return (20*p1*np.power(x,3) + 12*p2*np.power(x,2) + 6*p3*x + 2*p4)
+
+
 #
 # System state: none
 # System input: xref, vref
@@ -148,9 +170,9 @@ LatSlidingModeControl = ct.InterconnectedSystem(
 # Input Output Response
 ###############################################################################
 # time of response
-T = np.linspace(0, 50, 1000)
+T = np.linspace(0,2.0,10000)
 # the response
-tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,4.8,0.35])
+tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,5,0])
 
 target_y = []
 target_psi = []
