@@ -9,15 +9,24 @@ import numpy as np
 import control as ct
 import matplotlib.pyplot as plt
 
-c = 12
-rho = 0.01
-k = 1.0
+c = 36
 
-eps = 0.001
-Delta = 0.05
+lambda_0 = 1.0
+lambda_1 = 1.5
+lambda_2 = 2.0
 
-vref = -1
-delta_rate = 8.0
+rho = 0.02
+k = 1.1
+
+eps = 0.05
+Delta = 0.1
+Alpha = 4
+
+vref = 1
+target_delta = 0.4
+delta_rate = 4.0
+dt = 0.02
+global_delta = 0
 
 total_x = 0
 
@@ -28,34 +37,35 @@ p4 =  1752
 p5 = -4257
 p6 =  4128
 
-# System state: x, y, psi
-# System input: v, delta
-# System output: x, y,psi
+#
+# System state: x, y, psi , delta
+# System input: v,delta_rate
+# System output: x, y, psi, delta
 # System parameters: wheelbase, maxsteer
 #
 def vehicle_update(t, x, u, params):
     # Get the parameters for the model
     l = params.get('wheelbase', 2.6)         # vehicle wheelbase
-    delta_max = params.get('maxsteer', 0.5)    # max steering angle (rad)
-
+    delta_rate_max = params.get('maxsteer', 8)    # max steering angle (rad)
     # Saturate the steering input
-    delta = np.clip(u[1], -delta_max, delta_max)
+    delta_rate = np.clip(u[1], -delta_rate_max, delta_rate_max)
 
     # Return the derivative of the state
     return np.array([
-        np.cos(x[2]) * u[0],            # xdot = cos(psi) v
-        np.sin(x[2]) * u[0],            # ydot = sin(psi) v
-        (u[0] / l) * np.tan(delta)      # delta_dot = v/l tan(delta)
+        np.cos(x[2]) * u[0],                # xdot = cos(psi) v
+        np.sin(x[2]) * u[0],                # ydot = sin(psi) v
+        (u[0] / l) * np.tan(x[3]),          # psi_dot = v/l tan(delta)
+        delta_rate                          # delta_dot = u
     ])
 
 def vehicle_output(t, x, u, params):
-    return x                            # return x, y, psi (full state)
+    return x                         # return x, y, psi (full state)
 
 # Define the vehicle steering dynamics as an input/output system
 vehicle = ct.NonlinearIOSystem(
-    vehicle_update, vehicle_output, states=3, name='vehicle',
-    inputs=('v', 'delta'),
-    outputs=('x', 'y', 'psi'))
+    vehicle_update, vehicle_output, states=4, name='vehicle',
+    inputs=('v', 'delta_rate'),
+    outputs=('x', 'y', 'psi', 'delta'))
 
 ###############################################################################
 # Control 
@@ -73,38 +83,70 @@ def Sat(x):
         val = x/Delta
     return val
 #
-# System state: none
-# System input: v_r,ey,delta_r,psi_r,psi,last_delta
-# System output: v, delta
-# System parameters: l
-def control_output(t, x, u, params):
-    l = params.get('wheelbase', 2.6)
+# System state: z0, z1, z2
+# System input: ey, psi_r, psi
+# System output: z0, z1, z2
+# System parameters: none
+#
+def control_update(t, x, u, params):
+    x1 = u[0]
+    x2 = np.tan(u[1]) - np.tan(u[2])
+    sigma = c*x1 + x2
     
-    x2 = np.tan(u[4]) - np.tan(u[3])
-    x1 = u[1]
-    s = c*x1 + x2
-    c_delta = np.arctan(l*np.power(np.cos(u[4]),3)*(np.tan(u[2])/(l*np.power(np.cos(u[3]),3)) + c*x2 + rho*Sat(s) + k*s ))
+    v0 = -14.7361*np.power(np.fabs(x[0] - sigma),2/3)*np.sign(x[0] - sigma) + x[1]
+    v1 = -30*np.power(np.fabs(x[1] - v0),1/2)*np.sign(x[1] - v0) + x[2]
+    v2 = -400*np.sign(x[2] - v1)
+    return np.array([
+        v0,         # z0_dot = v0
+        v1,         # z1_dot = v1
+        v2          # z2_dot = v2
+    ])
+#
+# System state: z0, z1, z2
+# System input: none
+# System output: delta_rate
+# System parameters: none
+def control_output(t, x, u, params):    
+
+    a = x[2] + 2*np.power(np.fabs(x[1]) + np.power(np.fabs(x[0]),2/3),-0.5)*(x[1] + np.power(np.fabs(x[0]),2/3)*np.sign(x[0]))
+    b = np.fabs(x[2]) + 2*np.power(np.fabs(x[1]) + np.power(np.fabs(x[0]),2/3),0.5)
+    delta_rate = Alpha*a/b
     
-    return  np.array([u[0] + 0.0*np.sin(5*t),c_delta])
+#    delta_rate = Alpha*np.sign(x[2] + 2*np.power(np.power(np.fabs(x[1]),3) + np.power(x[0],2),1/6)*np.sign(x[1] + np.power(np.fabs(x[0]),2/3)))
+    
+    return delta_rate
 
 # Define the controller as an input/output system
 controller = ct.NonlinearIOSystem(
-    None, control_output, name='controller',        # static system
-    inputs=('v_r', 'e_y' ,'delta_r' ,'psi_r', 'psi'),    # system inputs
-    outputs=('v','delta')                            # system outputs
+    control_update, control_output, name='controller', states=3,    # static system
+    inputs=('e_y' , 'psi_r', 'psi'),                                # system inputs
+    outputs=('delta_rate')                                          # system outputs
 )
 
 ###############################################################################
 # Target
 ###############################################################################
+# sin function
+coefficient_a = 0.5
 def TargetLine(x):
-    return np.sqrt(25 - np.power(x,2))
+    return np.sin(coefficient_a*x) + 5
 
 def TargetLineFirstDerivative(x):
-    return -x/np.sqrt(25 - np.power(x,2))
+    return coefficient_a*np.cos(coefficient_a*x)
 
 def TargetLineSecondDerivative(x):
-    return -25.0*np.power((25 - np.power(x,2)),-1.5)
+    return -coefficient_a*coefficient_a*np.sin(coefficient_a*x)
+
+
+# circle
+#def TargetLine(x):
+#    return np.sqrt(25 - np.power(x,2))
+#
+#def TargetLineFirstDerivative(x):
+#    return -x/np.sqrt(25 - np.power(x,2))
+#
+#def TargetLineSecondDerivative(x):
+#    return -25.0*np.power((25 - np.power(x,2)),-1.5)
 
 ## zhl target line
     
@@ -148,13 +190,11 @@ LatSlidingModeControl = ct.InterconnectedSystem(
     # Interconnections between  subsystems
     connections=(
         ('target.x_ref','vehicle.x'),  
-        ('controller.v_r','target.v_r'),
+        ('vehicle.v','target.v_r'),
         ('controller.e_y','target.y_r','-vehicle.y'),
-        ('controller.delta_r','target.delta_ref'),
         ('controller.psi_r','target.psi_ref'),
         ('controller.psi','vehicle.psi'),
-        ('vehicle.v', 'controller.v'),
-        ('vehicle.delta', 'controller.delta'),
+        ('vehicle.delta_rate', 'controller.delta_rate'),
     ),
 
     # System inputs
@@ -162,7 +202,7 @@ LatSlidingModeControl = ct.InterconnectedSystem(
     inputs=['vref'],
 
     #  System outputs
-    outlist=['vehicle.x', 'vehicle.y' , 'vehicle.psi','controller.delta'],
+    outlist=['vehicle.x', 'vehicle.y' , 'vehicle.psi','vehicle.delta'],
     outputs=['x', 'y', 'psi', 'delta']
 )
 
@@ -170,9 +210,25 @@ LatSlidingModeControl = ct.InterconnectedSystem(
 # Input Output Response
 ###############################################################################
 # time of response
-T = np.linspace(0,2.0,10000)
+T = np.linspace(0,10,1000)
 # the response
-tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,5,0])
+tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0.1,0.1,0.1,0.0,5.0,0.31,0.0])
+
+#tout, yout = ct.input_output_response(vehicle, T, [vref*np.ones(len(T)),target_delta*np.ones(len(T)),delta_rate*np.ones(len(T))],X0=[0,5.0,0,0])
+
+#plt.figure()
+#plt.title('track')
+#plt.xlabel('x[m]')
+#plt.ylabel('y[m]')
+#plt.plot(yout[0],yout[1])
+#
+#
+#plt.figure()
+#plt.title('delta')
+#plt.xlabel('t[s]')
+#plt.ylabel('delta[deg]')
+#plt.plot(tout,yout[3])
+
 
 target_y = []
 target_psi = []
@@ -239,6 +295,17 @@ plt.xlabel('x[m]')
 plt.title('curvature')
 plt.plot(yout[0],targte_curvature)
 
+delta_rate = []
+for i in range(len(tout)):
+    if i == 0:
+        delta_rate.append(0)
+    else:
+        delta_rate.append(57.3*(yout[3][i] - yout[3][i-1])/(tout[i]-tout[i-1]))
+        
+plt.figure()
+plt.xlabel('t[m]')
+plt.title('delta_rate')
+plt.plot(tout,delta_rate)
 
 x = np.linspace(-1.0,1.0,1000)
 sigmoid_y = []
@@ -258,6 +325,8 @@ plt.title("Sat Function")
 plt.xlabel("Sat")
 plt.grid()
 plt.plot(x,sat_y)
+
+
 
 #plt.figure()
 #plt.title("Sliding Variable")

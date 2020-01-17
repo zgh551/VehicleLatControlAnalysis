@@ -9,40 +9,48 @@ import numpy as np
 import control as ct
 import matplotlib.pyplot as plt
 
-c = 24
-rho = 0.01
-k = 1.0
+# 
+c = 12
+rho = 0.02
+k = 1.1
 
-eps = 0.001
-Delta = 0.05
+# switch function parameter
+eps = 0.05
+Delta = 0.1
 
-vref = -2
+# reference velocity and the target steering delta angle 
+vref = 1
+target_delta = 0.4
 
-total_x = 0
+# five-oder curve 
+p1 = -1.478
+p2 =  36.5
+p3 = -358.6
+p4 =  1752
+p5 = -4257
+p6 =  4128
 
-# System state: x, y, psi
-# System input: v, delta
-# System output: x, y,psi
+# System state: x, y, psi , delta
+# System input: v, delta, delta_rate
+# System output: x, y, psi, delta
 # System parameters: wheelbase, maxsteer
 #
 def vehicle_update(t, x, u, params):
     # Get the parameters for the model
-    l = params.get('wheelbase', 3.)         # vehicle wheelbase
+    l = params.get('wheelbase', 2.6)         # vehicle wheelbase
     delta_max = params.get('maxsteer', 0.5)    # max steering angle (rad)
-
     # Saturate the steering input
     delta = np.clip(u[1], -delta_max, delta_max)
 
     # Return the derivative of the state
     return np.array([
-        -1.,            # xdot = cos(psi) v
-        -np.tan(x[3]),            # ydot = sin(psi) v
-        -np.tan(x[3])/(l*np.cos(x[3]))
-        (u[0] / l) * np.tan(delta)        # delta_dot = v/l tan(delta)
+        np.cos(x[2]) * u[0],                # xdot = cos(psi) v
+        np.sin(x[2]) * u[0],                # ydot = sin(psi) v
+        (u[0] / l) * np.tan(delta)          # delta_dot = v/l tan(delta)   
     ])
 
 def vehicle_output(t, x, u, params):
-    return x                            # return x, y, psi (full state)
+    return x                         # return x, y, psi (full state)
 
 # Define the vehicle steering dynamics as an input/output system
 vehicle = ct.NonlinearIOSystem(
@@ -60,24 +68,29 @@ def Sat(x):
     val = 0;
     if x >= Delta:
         val = 1
-    elif x <= Delta:
+    elif x <= -Delta:
         val = -1
     else:
         val = x/Delta
     return val
 #
 # System state: none
-# System input: v_r,ey,delta_r,psi_r,psi
+# System input: v_r, ey, delta_r, psi_r, psi, last_delta
 # System output: v, delta
 # System parameters: l
 def control_output(t, x, u, params):
-    l = params.get('wheelbase', 3)
+    l = params.get('wheelbase', 2.6)
     
-    x2 = np.tan(u[4]) - np.tan(u[3])
+#    x2 = np.tan(u[4]) - np.tan(u[3]) # v < 0
+    x2 = np.tan(u[3]) - np.tan(u[4]) # v > 0
+    
     x1 = u[1]
     s = c*x1 + x2
-    c_delta = np.arctan(l*np.power(np.cos(u[4]),3)*(np.tan(u[2])/(l*np.power(np.cos(u[3]),3)) + c*x2 + rho*Sat(s) + k*s ))
-    return  np.array([u[0] + 0.0*np.sin(5*t),c_delta])
+    c_delta = np.arctan(l*np.power(np.cos(u[4]),3)*(np.tan(u[2])/(l*np.power(np.cos(u[3]),3)) + c*x2 + rho*Sigmoid(s) + k*s ))
+    
+    ouput_delta = c_delta
+
+    return  np.array([u[0] + 0.0*np.sin(5*t),ouput_delta])
 
 # Define the controller as an input/output system
 controller = ct.NonlinearIOSystem(
@@ -89,14 +102,39 @@ controller = ct.NonlinearIOSystem(
 ###############################################################################
 # Target
 ###############################################################################
+# cos function
+coefficient_a = 0.4
 def TargetLine(x):
-    return np.sin(0.4*x) + 5
+    return np.cos(coefficient_a*x) + 5
 
 def TargetLineFirstDerivative(x):
-    return 0.4*np.cos(0.4*x)
+    return -coefficient_a*np.sin(coefficient_a*x)
 
 def TargetLineSecondDerivative(x):
-    return -0.16*np.sin(0.4*x)
+    return -coefficient_a*coefficient_a*np.cos(coefficient_a*x)
+
+# circle
+#def TargetLine(x):
+#    return np.sqrt(25 - np.power(x,2))
+#
+#def TargetLineFirstDerivative(x):
+#    return -x/np.sqrt(25 - np.power(x,2))
+#
+#def TargetLineSecondDerivative(x):
+#    return -25.0*np.power((25 - np.power(x,2)),-1.5)
+
+## zhl target line
+    
+#def TargetLine(x):
+#    return p1*np.power(x,5) + p2*np.power(x,4) + p3*np.power(x,3) + p4*np.power(x,2) + p5*x + p6
+#
+#def TargetLineFirstDerivative(x):
+#    return 5*p1*np.power(x,4) + 4*p2*np.power(x,3) + 3*p3*np.power(x,2) + 2*p4*x + p5
+#
+#def TargetLineSecondDerivative(x):
+#    return (20*p1*np.power(x,3) + 12*p2*np.power(x,2) + 6*p3*x + 2*p4)
+
+
 #
 # System state: none
 # System input: xref, vref
@@ -104,7 +142,7 @@ def TargetLineSecondDerivative(x):
 # System parameters: none
 #
 def target_output(t, x, u, params):
-    l = params.get('wheelbase', 3)
+    l = params.get('wheelbase', 2.6)
     
     y_r = TargetLine(u[0])
     psi_ref = np.arctan(TargetLineFirstDerivative(u[0]))
@@ -149,9 +187,9 @@ LatSlidingModeControl = ct.InterconnectedSystem(
 # Input Output Response
 ###############################################################################
 # time of response
-T = np.linspace(0, 50, 1000)
+T = np.linspace(0,40,2000)
 # the response
-tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,5,0])
+tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,6.0,0.0])
 
 target_y = []
 target_psi = []
@@ -180,6 +218,7 @@ plt.title('phase')
 plt.xlabel('x1[m]')
 plt.ylabel('x2[m]')
 plt.plot(x1,x2)
+plt.plot([-1,1],[c,-c])
  
 plt.figure()
 plt.title('Tracking')
@@ -216,40 +255,34 @@ plt.figure()
 plt.xlabel('x[m]')
 plt.title('curvature')
 plt.plot(yout[0],targte_curvature)
-#x = np.linspace(-1.0,1.0,1000)
-#y = []
-#for i in x:
-#    y.append(i/(np.fabs(i) + eps))
-#plt.figure()
-#plt.title("Sigmoid Function")
-#plt.xlabel("sigma")
-#plt.plot(x,y)
 
-#plt.figure()
-#plt.title("Sliding Variable")
-#plt.xlabel("Time[s]")
-#plt.plot(tout,c*yout[0]+yout[1])
-#
-#plt.figure() 
-#plt.grid()
-#plt.title("Asymptotic convergence for f(x,v,t)=sin(2t)")
-#plt.xlabel("Time(s)")
-#plt.plot(tout,yout[0],label='distance(m)')
-#plt.plot(tout,yout[1],label='velocity(m/s)')
-#plt.legend()
-#plt.title('unit mass modle(without disturbance)')
-#plt.figure()
-#plt.title("Phase portrait")
-#plt.xlabel("x")
-#plt.ylabel("v")
-#plt.plot(yout[0],yout[1])
-#
-#u = []
-#for i in range(len(tout)):
-#    u.append(c*yout[1][i] + rho*(c*yout[0][i] + yout[1][i])/(np.fabs(c*yout[0][i] + yout[1][i]) + eps))
-#    
-#plt.figure()
-#plt.title("Sliding mode control")
-#plt.xlabel("Time[s]")
-#plt.plot(tout,u)
-#plt.show()
+delta_rate = []
+for i in range(len(tout)):
+    if i == 0:
+        delta_rate.append(0)
+    else:
+        delta_rate.append(57.3*(yout[3][i] - yout[3][i-1])/(tout[i]-tout[i-1]))
+        
+plt.figure()
+plt.xlabel('t[m]')
+plt.title('delta_rate')
+plt.plot(tout,delta_rate)
+
+x = np.linspace(-1.0,1.0,1000)
+sigmoid_y = []
+for i in x:
+    sigmoid_y.append(Sigmoid(i))
+plt.figure()
+plt.title("Sigmoid Function")
+plt.xlabel("sigma")
+plt.grid()
+plt.plot(x,sigmoid_y)
+
+sat_y = []
+for i in x:
+    sat_y.append(Sat(i))
+plt.figure()
+plt.title("Sat Function")
+plt.xlabel("Sat")
+plt.grid()
+plt.plot(x,sat_y)
