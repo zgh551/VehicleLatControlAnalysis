@@ -37,12 +37,12 @@ R = np.eye(1)
 
 # parameters
 dt = 0.1  # time tick[s]
-L = 2.6  # Wheel base of the vehicle [m]
+L = 0.5  # Wheel base of the vehicle [m]
 max_steer = np.deg2rad(45.0)  # maximum steering angle[rad]
 
 show_animation = True
 #  show_animation = False
-
+vehicle_yaw = []
 
 class State:
 
@@ -64,7 +64,7 @@ def update(state, a, delta):
     state.y = state.y + state.v * math.sin(state.yaw) * dt
     state.yaw = state.yaw + state.v / L * math.tan(delta) * dt
     state.v = state.v + a * dt
-
+    state.yaw = pi_2_pi(state.yaw)
     return state
 
 
@@ -133,15 +133,30 @@ def Sat(x):
 ### cyaw: CubicSpline reference yaw angle
 ### ck: CubicSpline Curvature
 #
-    
+yaw_delta = 0.1
 def smc_steering_control(state, cx, cy, cyaw, ck):
-    ind, e = calc_nearest_index(state, cx, cy, cyaw)
     
-#    delta_r = np.arctan(wheel_base*ck[ind])
-    x1 = -e
-    x2 = np.tan(cyaw[ind]) - np.tan(state.yaw)
-    s = c*x1 + x2
-    delta_c = np.arctan(L*np.power(np.cos(state.yaw),3)*((L*ck[ind])/(L*np.power(np.cos(cyaw[ind]),3)) + c*x2 + rho*Sigmoid(s) + k*s))
+#    rote_state = State(x=-0.0, y=-0.0, yaw=0.0, v=0.0)
+    ind, e = calc_nearest_index(state, cx, cy, cyaw)
+    delta_r = np.arctan(L*ck[ind])
+    # rote 180 deg ,make the 
+    if state.yaw > (0.5*np.pi + yaw_delta) or state.yaw < (-0.5*np.pi - yaw_delta): 
+        rote_yaw = state.yaw - np.pi
+        line_yaw = cyaw[ind] - np.pi
+        x1 = -(cy[ind] - state.y)
+        x2 = np.tan(line_yaw) - np.tan(rote_yaw)
+        s = c*x1 + x2
+        delta_c = np.arctan(L*np.power(np.cos(rote_yaw),3)*((L*ck[ind])/(L*np.power(np.cos(line_yaw),3)) + c*x2 + rho*Sigmoid(s) + k*s))
+        print(">delta:",delta_c,"yaw:",state.yaw,"x1:",x1,"x2:",x2)
+    elif state.yaw < (0.5*np.pi - yaw_delta) and state.yaw > (-0.5*np.pi + yaw_delta):
+        x1 = cy[ind] - state.y
+        x2 = np.tan(cyaw[ind]) - np.tan(state.yaw)
+        s = c*x1 + x2
+        delta_c = np.arctan(L*np.power(np.cos(state.yaw),3)*((L*ck[ind])/(L*np.power(np.cos(cyaw[ind]),3)) + c*x2 + rho*Sigmoid(s) + k*s)) 
+        print("<delta:",delta_c,"yaw:",state.yaw,"x1:",x1,"x2:",x2)
+    else:
+        delta_c = delta_r
+        print("=delta:",delta_c,"yaw:",state.yaw)
     return delta_c,ind
     
     
@@ -164,7 +179,6 @@ def lqr_steering_control(state, cx, cy, cyaw, ck, pe, pth_e):
     B[3, 0] = v / L
 
     K, _, _ = dlqr(A, B, Q, R)
-
     x = np.zeros((4, 1))
 
     x[0, 0] = e
@@ -209,7 +223,7 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
     goal_dis = 0.3
     stop_speed = 0.05
 
-    state = State(x=-0.0, y=-0.0, yaw=0.0, v=0.0)
+    state = State(x=-0.0, y= 0.0, yaw=0.75, v=0.0)
 
     time = 0.0
     x = [state.x]
@@ -295,14 +309,17 @@ def main():
 #    ax = [0.0, 6.0, 12.5, 28.0, 37.5, 46.0, 58.0]
 #    ay = [0.0, -5.0, 6.0, -3.5, 8.0, -3.0, 5.0]
     
-    ax = [0.0, 6.0, 12.5, 10.0, 7.5, 3.0, -1.0]
-    ay = [0.0, -3.0, -5.0, 6.5, 3.0, 5.0, -2.0]
+#    ax = [0.0, 6.0, 12.5, 10.0, 7.5, 3.0, -1.0, 4.0, 8.0, 8.0, 8.0]
+#    ay = [0.0, -3.0, -5.0, 6.5, 3.0, 5.0, -2.0, -4.0, 0.0, 4.0, 16.0]
     
-    goal = [ax[-1], ay[-1]]
+    ax = [0.0, 12.0, 5.0, 0.0, -5.0, -12.0, 0.0]
+    ay = [0.0, 15.0, 20.0, 15.0, 20.0, 15.0, 0.0]
+    
+    goal = [ax[-1], ay[-3]]
 
     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
         ax, ay, ds=0.1)
-    target_speed = 3.6 / 3.6  # simulation parameter km/h -> m/s
+    target_speed = 7.2 / 3.6  # simulation parameter km/h -> m/s
 
     sp = calc_speed_profile(cx, cy, cyaw, target_speed)
 
