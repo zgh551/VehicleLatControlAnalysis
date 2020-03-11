@@ -23,3 +23,28 @@
 
 ### 高阶滑模分析
 
+待补充
+
+
+
+### 基于车辆后轴位置反馈的跟踪控制
+
+![](https://raw.githubusercontent.com/zgh551/FigureBed/master/img/20200311173918.png)
+
+仿真框图如上，基于上述框图搭建仿真环境。
+
+#### 余弦曲线跟踪
+
+![](https://raw.githubusercontent.com/zgh551/FigureBed/master/img/20200311174324.png)
+
+上图可知，跟踪效果很好。
+
+![](https://raw.githubusercontent.com/zgh551/FigureBed/master/img/20200311175620.png)
+
+输出控制抖动也较小。
+
+### 圆弧跟踪
+
+![](https://raw.githubusercontent.com/zgh551/FigureBed/master/img/20200311180059.png)
+
+![](https://raw.githubusercontent.com/zgh551/FigureBed/master/img/20200311180151.png)
