@@ -9,9 +9,11 @@ import numpy as np
 import control as ct
 import matplotlib.pyplot as plt
 
-# 
-c = 12
-rho = 0.02
+simulation_time = 40
+
+# 滑模控制参数
+c = 2
+rho = 0.01
 k = 1.1
 
 # switch function parameter
@@ -19,44 +21,94 @@ eps = 0.05
 Delta = 0.1
 
 # reference velocity and the target steering delta angle 
-vref = 1
-target_delta = 0.4
+v_ref = 1
 
-# five-oder curve 
-p1 = -1.478
-p2 =  36.5
-p3 = -358.6
-p4 =  1752
-p5 = -4257
-p6 =  4128
+# vehicle init position
+init_x = 0.0
+init_y = 0.0
+init_yaw = 0.0
 
-# System state: x, y, psi , delta
-# System input: v, delta, delta_rate
-# System output: x, y, psi, delta
-# System parameters: wheelbase, maxsteer
+###############################################################################
+# Target
+###############################################################################
+# cos function
+coefficient_a = 0.4
+def COS_Target_Line(index):
+    return index,np.cos(coefficient_a*index) - 1
+
+radius = 10
+def Circle_Target_Line(index):
+    return radius*np.cos(index + np.pi*0.5),(radius*np.sin(index + np.pi*0.5) - radius)
+# 定义目标曲线结构
+class TargetCurvature:
+    def __init__(self,x=0.0,y=0.0,yaw=0.0,k=0.0,v=0.0):
+        self.x = x
+        self.y = y
+        self.yaw = yaw
+        self.k   = k
+        self.v   = v
+  
+# 声明目标曲线数组      
+target_curvature_sets = TargetCurvature(x=[], y= [], yaw=[], k = [], v=[])
+
+# 产生曲线数据集
+#for i in np.arange(0,simulation_time*v_ref,0.05):
+#    x,y = COS_Target_Line(i)
+#    target_curvature_sets.x.append(x)
+#    target_curvature_sets.y.append(y)
+#    target_curvature_sets.v.append(v_ref)
+    
+for i in np.arange(0,-simulation_time*v_ref/radius,-0.05):
+    x,y = Circle_Target_Line(i)
+    target_curvature_sets.x.append(x)
+    target_curvature_sets.y.append(y)
+    target_curvature_sets.v.append(v_ref)
+
+# 求取目标曲线的斜率
+for i in range(len(target_curvature_sets.x)):
+    if i == 0:
+        dx = target_curvature_sets.x[i+1] - target_curvature_sets.x[i]
+        dy = target_curvature_sets.y[i+1] - target_curvature_sets.y[i]
+        ddx = target_curvature_sets.x[2] + target_curvature_sets.x[0] - 2*target_curvature_sets.x[1]
+        ddy = target_curvature_sets.y[2] + target_curvature_sets.y[0] - 2*target_curvature_sets.y[1]
+    elif i == (len(target_curvature_sets.x)-1):
+        dx = target_curvature_sets.x[i] - target_curvature_sets.x[i-1]
+        dy = target_curvature_sets.y[i] - target_curvature_sets.y[i-1]
+        ddx = target_curvature_sets.x[i] + target_curvature_sets.x[i-2] - 2*target_curvature_sets.x[i-1]
+        ddy = target_curvature_sets.y[i] + target_curvature_sets.y[i-2] - 2*target_curvature_sets.y[i-1]
+    else:      
+        dx = target_curvature_sets.x[i+1] - target_curvature_sets.x[i]
+        dy = target_curvature_sets.y[i+1] - target_curvature_sets.y[i]
+        ddx = target_curvature_sets.x[i+1] + target_curvature_sets.x[i-1] - 2*target_curvature_sets.x[i]
+        ddy = target_curvature_sets.y[i+1] + target_curvature_sets.y[i-1] - 2*target_curvature_sets.y[i]
+        
+    target_curvature_sets.yaw.append(np.arctan2(dy,dx))
+    target_curvature_sets.k.append((ddy*dx-ddx*dy)/(np.power(np.power(dx,2)+np.power(dy,2),1.5)))
+   
+
 #
-def vehicle_update(t, x, u, params):
-    # Get the parameters for the model
-    l = params.get('wheelbase', 2.6)         # vehicle wheelbase
-    delta_max = params.get('maxsteer', 0.5)    # max steering angle (rad)
-    # Saturate the steering input
-    delta = np.clip(u[1], -delta_max, delta_max)
+# System state: none
+# System input: v_ref,x,y
+# System output: x_r, y_r, yaw_r, k_r, v_r
+# System parameters: none
+#
+def target_output(t, x, u, params):
+    ex = [u[1] - icx for icx in target_curvature_sets.x]
+    ey = [u[2] - icy for icy in target_curvature_sets.y]
 
-    # Return the derivative of the state
-    return np.array([
-        np.cos(x[2]) * u[0],                # xdot = cos(psi) v
-        np.sin(x[2]) * u[0],                # ydot = sin(psi) v
-        (u[0] / l) * np.tan(delta)          # delta_dot = v/l tan(delta)   
-    ])
+    d = [idx ** 2 + idy ** 2 for (idx, idy) in zip(ex, ey)]
 
-def vehicle_output(t, x, u, params):
-    return x                         # return x, y, psi (full state)
+    mind = min(d)
 
-# Define the vehicle steering dynamics as an input/output system
-vehicle = ct.NonlinearIOSystem(
-    vehicle_update, vehicle_output, states=3, name='vehicle',
-    inputs=('v', 'delta'),
-    outputs=('x', 'y', 'psi'))
+    index = d.index(mind)
+    
+    return np.array([target_curvature_sets.x[index],target_curvature_sets.y[index],target_curvature_sets.yaw[index],target_curvature_sets.k[index],u[0]])
+
+# Define the trajectory generator as an input/output system
+target = ct.NonlinearIOSystem(
+    None, target_output, name='target',
+    inputs=('v_ref', 'x', 'y'),
+    outputs=('x_r', 'y_r', 'yaw_r', 'k_r' , 'v_r'))
 
 ###############################################################################
 # Control 
@@ -73,216 +125,175 @@ def Sat(x):
     else:
         val = x/Delta
     return val
+
+# angle to -pi-pi
+def pi_2_pi(angle):
+    return (angle + np.pi) % (2 * np.pi) - np.pi
 #
 # System state: none
-# System input: v_r, ey, delta_r, psi_r, psi, last_delta
-# System output: v, delta
+# System input:  e_x, e_y, e_yaw, yaw_ref, k_ref, v_ref
+# System output: delta, v_r
 # System parameters: l
 def control_output(t, x, u, params):
     l = params.get('wheelbase', 2.6)
     
-#    x2 = np.tan(u[4]) - np.tan(u[3]) # v < 0
-    x2 = np.tan(u[3]) - np.tan(u[4]) # v > 0
+    ex = u[0]
+    ey = u[1]
+    target_delta = np.arctan(l*u[4]) # target delta
+    target_yaw   = u[3] # (-pi,pi)
+    actual_yaw   = pi_2_pi(u[3] - u[2]) # (-pi,pi)
     
-    x1 = u[1]
+    if actual_yaw >= -np.pi and actual_yaw < -0.75*np.pi:
+        rote_angle = 0.75*np.pi
+    elif actual_yaw >= -0.75*np.pi and actual_yaw < -0.5*np.pi:
+        rote_angle = 0.5*np.pi
+    elif actual_yaw >= -0.5*np.pi and actual_yaw < -0.25*np.pi:
+        rote_angle = 0.25*np.pi
+    elif actual_yaw >= -0.25*np.pi and actual_yaw < 0.0:  
+        rote_angle = 0.0
+    elif actual_yaw >= 0.0 and actual_yaw < 0.25*np.pi:
+        rote_angle = 0.0
+    elif actual_yaw >= 0.25*np.pi and actual_yaw < 0.5*np.pi:
+        rote_angle = -0.25*np.pi
+    elif actual_yaw >= 0.5*np.pi and actual_yaw < 0.75*np.pi:    
+        rote_angle = -0.5*np.pi
+    elif actual_yaw >= 0.75*np.pi and actual_yaw <= np.pi: 
+        rote_angle = -0.75*np.pi
+    else:
+        print("over the horh")
+        
+    actual_yaw = actual_yaw + rote_angle
+    target_yaw = target_yaw + rote_angle
+    
+    x1 = ex*np.sin(rote_angle) + ey*np.cos(rote_angle)
+    
+#    x2 = np.tan(actual_yaw) - np.tan(target_yaw) # v < 0
+    x2 = np.tan(target_yaw) - np.tan(actual_yaw) # v > 0
+    
+    
     s = c*x1 + x2
-    c_delta = np.arctan(l*np.power(np.cos(u[4]),3)*(np.tan(u[2])/(l*np.power(np.cos(u[3]),3)) + c*x2 + rho*Sigmoid(s) + k*s ))
+    c_delta = np.arctan(l*np.power(np.cos(actual_yaw),3)*(np.tan(target_delta)/(l*np.power(np.cos(target_yaw),3)) + c*x2 + rho*Sigmoid(s) + k*s ))
     
     ouput_delta = c_delta
-
-    return  np.array([u[0] + 0.0*np.sin(5*t),ouput_delta])
+    
+    return  np.array([ouput_delta, u[5]])
 
 # Define the controller as an input/output system
 controller = ct.NonlinearIOSystem(
-    None, control_output, name='controller',        # static system
-    inputs=('v_r', 'e_y' ,'delta_r' ,'psi_r', 'psi'),    # system inputs
-    outputs=('v','delta')                            # system outputs
+    None, control_output, name='controller',                        # static system
+    inputs=('e_x', 'e_y' ,'e_yaw' ,'yaw_ref', 'k_ref', 'v_ref'),    # system inputs
+    outputs=('delta', 'v')                                          # system outputs
 )
 
 ###############################################################################
-# Target
+# Kenamic of Vehicle Plant
 ###############################################################################
-# cos function
-coefficient_a = 0.4
-def TargetLine(x):
-    return np.cos(coefficient_a*x) + 5
+# System state: x, y, yaw
+# System input: delta, v
+# System output: x, y, yaw
+# System parameters: wheelbase, maxsteer
+# 
+def vehicle_update(t, x, u, params):
+    # Get the parameters for the model
+    l = params.get('wheelbase', 2.6)         # vehicle wheelbase
+    delta_max = params.get('maxsteer', 0.5)    # max steering angle (rad)
+    # Saturate the steering input
+    delta = np.clip(u[0], -delta_max, delta_max)
 
-def TargetLineFirstDerivative(x):
-    return -coefficient_a*np.sin(coefficient_a*x)
+    # Return the derivative of the state
+    return np.array([
+        np.cos(x[2]) * u[1],                # xdot = cos(psi) v
+        np.sin(x[2]) * u[1],                # ydot = sin(psi) v
+        (u[1] / l) * np.tan(delta)          # delta_dot = v/l tan(delta)   
+    ])
 
-def TargetLineSecondDerivative(x):
-    return -coefficient_a*coefficient_a*np.cos(coefficient_a*x)
+def vehicle_output(t, x, u, params):
+    return x                                # return x, y, psi (full state)
 
-# circle
-#def TargetLine(x):
-#    return np.sqrt(25 - np.power(x,2))
-#
-#def TargetLineFirstDerivative(x):
-#    return -x/np.sqrt(25 - np.power(x,2))
-#
-#def TargetLineSecondDerivative(x):
-#    return -25.0*np.power((25 - np.power(x,2)),-1.5)
-
-## zhl target line
-    
-#def TargetLine(x):
-#    return p1*np.power(x,5) + p2*np.power(x,4) + p3*np.power(x,3) + p4*np.power(x,2) + p5*x + p6
-#
-#def TargetLineFirstDerivative(x):
-#    return 5*p1*np.power(x,4) + 4*p2*np.power(x,3) + 3*p3*np.power(x,2) + 2*p4*x + p5
-#
-#def TargetLineSecondDerivative(x):
-#    return (20*p1*np.power(x,3) + 12*p2*np.power(x,2) + 6*p3*x + 2*p4)
-
-
-#
-# System state: none
-# System input: xref, vref
-# System output: y_r, psi_r, delta_r ,v_r
-# System parameters: none
-#
-def target_output(t, x, u, params):
-    l = params.get('wheelbase', 2.6)
-    
-    y_r = TargetLine(u[0])
-    psi_ref = np.arctan(TargetLineFirstDerivative(u[0]))
-    delta_ref = np.arctan(l*np.power(np.cos(psi_ref),3)*TargetLineSecondDerivative(u[0]))
-    return np.array([y_r,psi_ref,delta_ref,u[1]])
-
-# Define the trajectory generator as an input/output system
-target = ct.NonlinearIOSystem(
-    None, target_output, name='target',
-    inputs=('x_ref','v_ref'),
-    outputs=('y_r', 'psi_ref', 'delta_ref' , 'v_r'))
+# Define the vehicle steering dynamics as an input/output system
+vehicle = ct.NonlinearIOSystem(
+    vehicle_update, vehicle_output, states=3, name='vehicle',
+    inputs=('delta', 'v'),
+    outputs=('x', 'y', 'yaw'))
 
 ###############################################################################
 # System Connect
 ###############################################################################
-LatSlidingModeControl = ct.InterconnectedSystem(
+LatRearWheelFeedbackControl = ct.InterconnectedSystem(
     # List of subsystems
-    (target, controller, vehicle), name='LatSlidingModeControl',
+    (target, controller, vehicle), name='LatRearWheelFeedbackControl',
 
     # Interconnections between  subsystems
     connections=(
-        ('target.x_ref','vehicle.x'),  
-        ('controller.v_r','target.v_r'),
-        ('controller.e_y','target.y_r','-vehicle.y'),
-        ('controller.delta_r','target.delta_ref'),
-        ('controller.psi_r','target.psi_ref'),
-        ('controller.psi','vehicle.psi'),
-        ('vehicle.v', 'controller.v'),
+        ('target.x','vehicle.x'),
+        ('target.y','vehicle.y'),
+        
+        ('controller.e_x','-vehicle.x','target.x_r'), # e_x:x轴方向偏差
+        ('controller.e_y','-vehicle.y','target.y_r'), # e_y:y轴方向偏差
+        ('controller.e_yaw','-vehicle.yaw','target.yaw_r'), # e_yaw:偏航角偏差
+        ('controller.yaw_ref','target.yaw_r'),
+        ('controller.k_ref','target.k_r'),
+        ('controller.v_ref','target.v_r'),
+        
         ('vehicle.delta', 'controller.delta'),
+        ('vehicle.v', 'controller.v')
     ),
 
     # System inputs
     inplist=['target.v_ref'],
-    inputs=['vref'],
+    inputs=['v_ref'],
 
     #  System outputs
-    outlist=['vehicle.x', 'vehicle.y' , 'vehicle.psi','controller.delta'],
-    outputs=['x', 'y', 'psi', 'delta']
+    outlist=['vehicle.x', 'vehicle.y' , 'vehicle.yaw','controller.delta','target.yaw_r'],
+    outputs=['x', 'y', 'psi', 'delta', 'psi_ref']
 )
 
 ###############################################################################
 # Input Output Response
 ###############################################################################
 # time of response
-T = np.linspace(0,40,2000)
+T = np.linspace(0,simulation_time,2000)
 # the response
-tout, yout = ct.input_output_response(LatSlidingModeControl, T, [vref*np.ones(len(T))],X0=[0,6.0,0.0])
+tout, yout = ct.input_output_response(LatRearWheelFeedbackControl, T, [v_ref*np.ones(len(T))],X0=[init_x,init_y,init_yaw])
 
-target_y = []
-target_psi = []
-targte_curvature = []
-for x in yout[0]:
-    target_y.append(TargetLine(x))
-    target_psi.append(np.arctan(TargetLineFirstDerivative(x)))
-    targte_curvature.append(np.power(np.cos(np.arctan(TargetLineFirstDerivative(x))),3)*TargetLineSecondDerivative(x))
-    
-    
-x1 = target_y - yout[1]
-
-x2 = []
-for i in range(len(tout)):
-    x2.append(np.tan(yout[3][i]) - np.tan(target_psi[i]))
-
-s = c*x1 + x2
-
-plt.figure()
-plt.title('Sliding Variable')
-plt.xlabel('x[m]')
-plt.plot(tout,s)
-
-plt.figure()
-plt.title('phase')
-plt.xlabel('x1[m]')
-plt.ylabel('x2[m]')
-plt.plot(x1,x2)
-plt.plot([-1,1],[c,-c])
  
 plt.figure()
 plt.title('Tracking')
+
+plt.subplot(2,1,1)
+plt.grid()
+plt.title('Position Track')
 plt.xlabel('x[m]')
 plt.ylabel('y[m]')
-plt.plot(yout[0],yout[1])
-plt.plot(yout[0],target_y)
+plt.plot(yout[0],yout[1],label="track_path")
+plt.plot(target_curvature_sets.x,target_curvature_sets.y,label="target_curvature")
+plt.legend()
+plt.subplot(2,1,2)
+plt.grid()
+plt.title('Yaw Track')
+plt.xlabel('x[m]')
+plt.ylabel('angle[rad]')
+plt.plot(yout[0],yout[2],label="yaw")
+plt.plot(yout[0],yout[4],label="yaw_ref")
+plt.legend()
 
 plt.figure()
-plt.title('pis angle')
+plt.grid()
+plt.title('Yaw angle')
 plt.xlabel('x[m]')
 plt.ylabel('psi[rad]')
-plt.plot(yout[0],yout[2])
+plt.plot(tout,yout[2])
 
 plt.figure()
+plt.grid()
 plt.title('steering angle')
 plt.xlabel('x[m]')
 plt.ylabel('steering angle(deg/s)')
-plt.plot(yout[0],yout[3]*16*57.3)
+plt.plot(tout,yout[3]*16*57.3)
 
 plt.figure()
-plt.title('err of y')
-plt.xlabel('x[m]')
-plt.ylabel('ey[m]')
-plt.plot(yout[0],target_y - yout[1])
-
-plt.figure()
-plt.title('err of psi')
-plt.xlabel('x[m]')
-plt.ylabel('e_psi[rad]')
-plt.plot(yout[0],target_psi - yout[2])
-
-plt.figure()
-plt.xlabel('x[m]')
 plt.title('curvature')
-plt.plot(yout[0],targte_curvature)
-
-delta_rate = []
-for i in range(len(tout)):
-    if i == 0:
-        delta_rate.append(0)
-    else:
-        delta_rate.append(57.3*(yout[3][i] - yout[3][i-1])/(tout[i]-tout[i-1]))
-        
-plt.figure()
-plt.xlabel('t[m]')
-plt.title('delta_rate')
-plt.plot(tout,delta_rate)
-
-x = np.linspace(-1.0,1.0,1000)
-sigmoid_y = []
-for i in x:
-    sigmoid_y.append(Sigmoid(i))
-plt.figure()
-plt.title("Sigmoid Function")
-plt.xlabel("sigma")
-plt.grid()
-plt.plot(x,sigmoid_y)
-
-sat_y = []
-for i in x:
-    sat_y.append(Sat(i))
-plt.figure()
-plt.title("Sat Function")
-plt.xlabel("Sat")
-plt.grid()
-plt.plot(x,sat_y)
+plt.xlabel('x[m]')
+plt.plot(target_curvature_sets.y)
+plt.plot(target_curvature_sets.yaw)
+plt.plot(target_curvature_sets.k)
