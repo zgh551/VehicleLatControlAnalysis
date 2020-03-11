@@ -9,7 +9,7 @@ import numpy as np
 import control as ct
 import matplotlib.pyplot as plt
 
-simulation_time = 20
+simulation_time = 40
 
 # steering control parameter
 K_yaw = 1.0
@@ -23,6 +23,9 @@ init_x = 0.0
 init_y = 0.0
 init_yaw = 0.0
 
+# angle to -pi-pi
+def pi_2_pi(angle):
+    return (angle + np.pi) % (2 * np.pi) - np.pi
 ###############################################################################
 # Target
 ###############################################################################
@@ -48,17 +51,17 @@ def Circle_Target_Line(index):
     return radius*np.cos(index + np.pi*0.5),(radius*np.sin(index + np.pi*0.5) - radius)
 
 # 产生曲线数据集
-for i in np.arange(0,simulation_time*v_ref,0.05):
-    x,y = COS_Target_Line(i)
-    target_curvature_sets.x.append(x)
-    target_curvature_sets.y.append(y)
-    target_curvature_sets.v.append(v_ref)
-    
-#for i in np.arange(0,simulation_time*v_ref/radius,0.05):
-#    x,y = Circle_Target_Line(i)
+#for i in np.arange(0,simulation_time*v_ref,0.05):
+#    x,y = COS_Target_Line(i)
 #    target_curvature_sets.x.append(x)
 #    target_curvature_sets.y.append(y)
 #    target_curvature_sets.v.append(v_ref)
+    
+for i in np.arange(0,-simulation_time*v_ref/radius,-0.05):
+    x,y = Circle_Target_Line(i)
+    target_curvature_sets.x.append(x)
+    target_curvature_sets.y.append(-y)
+    target_curvature_sets.v.append(v_ref)
 
 # 求取目标曲线的斜率
 for i in range(len(target_curvature_sets.x)):
@@ -109,9 +112,6 @@ target = ct.NonlinearIOSystem(
 ###############################################################################
 # Control 
 ###############################################################################
-# angle to -pi-pi
-def pi_2_pi(angle):
-    return (angle + np.pi) % (2 * np.pi) - np.pi
 #
 # System state: none
 # System input:  e_x, e_y, e_yaw, yaw_ref, k_ref, v_ref
@@ -123,9 +123,9 @@ def control_output(t, x, u, params):
     err_crs = np.cos(u[3])*u[1] - np.sin(u[3])*u[0]
     err_yaw = pi_2_pi(u[2])
     
-    yaw_omega = u[5] * u[4] * np.cos(u[2])/(1.0 + u[4]*err_crs) \
-              - K_e  * u[5] * np.sin(u[2]) * err_crs / err_yaw \
-              - K_yaw * np.fabs(u[5]) * u[2]
+    yaw_omega = u[5] * u[4] * np.cos(err_yaw)/(1.0 + u[4]*err_crs) \
+              - K_e  * u[5] * np.sin(err_yaw) * err_crs / err_yaw \
+              - K_yaw * np.fabs(u[5]) * err_yaw
 
     if yaw_omega == 0.0 or  err_yaw == 0.0:
         return ([0.0,u[5]])
@@ -164,7 +164,7 @@ def vehicle_update(t, x, u, params):
     ])
 
 def vehicle_output(t, x, u, params):
-    return x                                # return x, y, psi (full state)
+    return np.array([x[0],x[1],pi_2_pi(x[2])])                                # return x, y, psi (full state)
 
 # Define the vehicle steering dynamics as an input/output system
 vehicle = ct.NonlinearIOSystem(
