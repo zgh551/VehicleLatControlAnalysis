@@ -19,9 +19,9 @@ except:
 
 
 
-c = 12
-rho = 0.02
-k = 1.1
+c = 3
+rho = 0.01
+k = 0.5
 wheel_base = 2.6
 
 # switch function parameter
@@ -31,13 +31,17 @@ Delta = 0.1
 
 Kp = 1.0  # speed proportional gain
 
+# steering control parameter
+KTH = 1.0
+KE = 1.0
+
 # LQR parameter
 Q = np.eye(4)
 R = np.eye(1)
 
 # parameters
 dt = 0.1  # time tick[s]
-L = 0.5  # Wheel base of the vehicle [m]
+L = 2.8  # Wheel base of the vehicle [m]
 max_steer = np.deg2rad(45.0)  # maximum steering angle[rad]
 
 show_animation = True
@@ -133,18 +137,18 @@ def Sat(x):
 ### cyaw: CubicSpline reference yaw angle
 ### ck: CubicSpline Curvature
 #
-yaw_delta = 0.1
+yaw_delta = 0.2
 def smc_steering_control(state, cx, cy, cyaw, ck):
     
 #    rote_state = State(x=-0.0, y=-0.0, yaw=0.0, v=0.0)
     ind, e = calc_nearest_index(state, cx, cy, cyaw)
-    delta_r = np.arctan(L*ck[ind])
+    
     # rote 180 deg ,make the 
     if state.yaw > (0.5*np.pi + yaw_delta) or state.yaw < (-0.5*np.pi - yaw_delta): 
-        rote_yaw = state.yaw - np.pi
-        line_yaw = cyaw[ind] - np.pi
-        x1 = -(cy[ind] - state.y)
-        x2 = np.tan(line_yaw) - np.tan(rote_yaw)
+        rote_yaw = state.yaw - 0
+        line_yaw = cyaw[ind] - 0
+        x1 = (cy[ind] - state.y)
+        x2 = -(np.tan(line_yaw) - np.tan(rote_yaw))
         s = c*x1 + x2
         delta_c = np.arctan(L*np.power(np.cos(rote_yaw),3)*((L*ck[ind])/(L*np.power(np.cos(line_yaw),3)) + c*x2 + rho*Sigmoid(s) + k*s))
         print(">delta:",delta_c,"yaw:",state.yaw,"x1:",x1,"x2:",x2)
@@ -155,11 +159,95 @@ def smc_steering_control(state, cx, cy, cyaw, ck):
         delta_c = np.arctan(L*np.power(np.cos(state.yaw),3)*((L*ck[ind])/(L*np.power(np.cos(cyaw[ind]),3)) + c*x2 + rho*Sigmoid(s) + k*s)) 
         print("<delta:",delta_c,"yaw:",state.yaw,"x1:",x1,"x2:",x2)
     else:
-        delta_c = delta_r
+        x1 = cy[ind] - state.y
+        if(state.yaw <= (np.pi*0.5-0.01) or state.yaw >= (-np.pi*0.5+0.01)):
+            x2 = -(cyaw[ind] - state.yaw)
+        elif(state.yaw >= (np.pi*0.5+0.01) or state.yaw <= (-np.pi*0.5-0.01)):
+            x2 = (cyaw[ind] - state.yaw)
+        else:
+            x2 = 0
+        s = c*x1 + x2
+        
+        delta_r = np.arctan2(L*ck[ind],1)
+        delta_c = delta_r + np.arctan( rho*Sigmoid(s) + k*s)
         print("=delta:",delta_c,"yaw:",state.yaw)
     return delta_c,ind
+   
     
+def smc_steering_control_rote(state, cx, cy, cyaw, ck):
     
+    ind, e = calc_nearest_index(state, cx, cy, cyaw)
+    
+    if state.yaw >= -np.pi and state.yaw < -0.75*np.pi:
+        rote_angle = 0.75*np.pi
+    elif state.yaw >= -0.75*np.pi and state.yaw < -0.5*np.pi:
+        rote_angle = 0.5*np.pi
+    elif state.yaw >= -0.5*np.pi and state.yaw < -0.25*np.pi:
+        rote_angle = 0.25*np.pi
+    elif state.yaw >= -0.25*np.pi and state.yaw < 0.0:  
+        rote_angle = 0.0
+    elif state.yaw >= 0.0 and state.yaw < 0.25*np.pi:
+        rote_angle = 0.0
+    elif state.yaw >= 0.25*np.pi and state.yaw < 0.5*np.pi:
+        rote_angle = -0.25*np.pi
+    elif state.yaw >= 0.5*np.pi and state.yaw < 0.75*np.pi:    
+        rote_angle = -0.5*np.pi
+    elif state.yaw >= 0.75*np.pi and state.yaw <= np.pi: 
+        rote_angle = -0.75*np.pi
+    else:
+        print("over the horh")
+    
+    cos_r = np.cos(rote_angle)
+    sin_r = np.sin(rote_angle) 
+    
+    ROTE = np.zeros((2,2))
+    
+    ROTE[0,0] =   cos_r
+    ROTE[0,1] =  -sin_r
+    ROTE[1,0] =   sin_r
+    ROTE[1,1] =   cos_r
+    
+    actual_yaw = state.yaw + rote_angle
+    target_yaw = cyaw[ind] + rote_angle
+    
+    actual_f = np.zeros((2,1))
+    actual_r = np.zeros((2,1))
+    actual_f[0,0] = state.x
+    actual_f[1,0] = state.y
+    actual_r = ROTE @ actual_f  
+    
+    target_f = np.zeros((2,1))
+    target_r = np.zeros((2,1))
+    target_f[0,0] = cx[ind] 
+    target_f[1,0] = cy[ind]   
+    target_r = ROTE @ target_f
+     
+    x1 = target_r[1,0] - actual_r[1,0]
+    x2 = np.tan(target_yaw) - np.tan(actual_yaw)
+    s = c*x1 + x2
+    delta_c = np.arctan(L*np.power(np.cos(actual_yaw),3)*((L*ck[ind])/(L*np.power(np.cos(target_yaw),3)) + c*x2 + rho*Sigmoid(s) + k*s)) 
+    print("delta:",delta_c,"x1:",x1,"x2:",x2)
+
+    return delta_c,ind
+
+def rear_wheel_feedback_control(state, cx, cy, cyaw, ck, preind):
+    ind, e = calc_nearest_index(state, cx, cy, cyaw)
+
+    k = ck[ind]
+    v = state.v
+    th_e = pi_2_pi(state.yaw - cyaw[ind])
+
+    omega = v * k * math.cos(th_e) / (1.0 - k * e) - \
+        KTH * abs(v) * th_e - KE * v * math.sin(th_e) * e / th_e
+
+    if th_e == 0.0 or omega == 0.0:
+        return 0.0, ind
+
+    delta = math.atan2(L * omega / v, 1.0)
+    #  print(k, v, e, th_e, omega, delta)
+
+    return delta, ind
+
 def lqr_steering_control(state, cx, cy, cyaw, ck, pe, pth_e):
     ind, e = calc_nearest_index(state, cx, cy, cyaw)
 
@@ -220,10 +308,10 @@ def calc_nearest_index(state, cx, cy, cyaw):
 
 def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
     T = 500.0  # max simulation time
-    goal_dis = 0.3
+    goal_dis = 0.1
     stop_speed = 0.05
 
-    state = State(x=-0.0, y= 0.0, yaw=0.75, v=0.0)
+    state = State(x=-0.0, y= 0.0, yaw=0.0, v=0.0)
 
     time = 0.0
     x = [state.x]
@@ -231,15 +319,18 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
     yaw = [state.yaw]
     v = [state.v]
     t = [0.0]
-
-#    e, e_th = 0.0, 0.0
+    delta = [0.0]
+    
+    e, e_th = 0.0, 0.0
 
     while T >= time:
-#        dl, target_ind, e, e_th = lqr_steering_control(
-#            state, cx, cy, cyaw, ck, e, e_th)
+#        dl, target_ind, e, e_th = lqr_steering_control(state, cx, cy, cyaw, ck, e, e_th)
+        
+#        dl, target_ind = smc_steering_control_rote(state, cx, cy, cyaw, ck)
+#        dl, target_ind = smc_steering_control(state, cx, cy, cyaw, ck)
 
-        dl, target_ind = smc_steering_control(state, cx, cy, cyaw, ck)
-
+        dl, target_ind = rear_wheel_feedback_control(state, cx, cy, cyaw, ck,0)
+        
         ai = PIDControl(speed_profile[target_ind], state.v)
         state = update(state, ai, dl)
 
@@ -260,7 +351,8 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
         yaw.append(state.yaw)
         v.append(state.v)
         t.append(time)
-
+        delta.append(dl)
+        
         if target_ind % 1 == 0 and show_animation:
             plt.cla()
             # for stopping simulation with the esc key.
@@ -275,7 +367,7 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
                       + ",target index:" + str(target_ind))
             plt.pause(0.0001)
 
-    return t, x, y, yaw, v
+    return t, x, y, yaw, v, delta
 
 
 def calc_speed_profile(cx, cy, cyaw, target_speed):
@@ -309,21 +401,31 @@ def main():
 #    ax = [0.0, 6.0, 12.5, 28.0, 37.5, 46.0, 58.0]
 #    ay = [0.0, -5.0, 6.0, -3.5, 8.0, -3.0, 5.0]
     
-#    ax = [0.0, 6.0, 12.5, 10.0, 7.5, 3.0, -1.0, 4.0, 8.0, 8.0, 8.0]
-#    ay = [0.0, -3.0, -5.0, 6.5, 3.0, 5.0, -2.0, -4.0, 0.0, 4.0, 16.0]
+#    ax = [0.0,  6.0, 12.5, 10.0, 7.5, 3.0, -1.0]
+#    ay = [0.0, -3.0, -5.0, 6.5, 3.0, 5.0, -2.0]
     
-    ax = [0.0, 12.0, 5.0, 0.0, -5.0, -12.0, 0.0]
-    ay = [0.0, 15.0, 20.0, 15.0, 20.0, 15.0, 0.0]
+#    ax = [0.0,  -6.0, -12.5, -10.0, -7.5, -3.0, 1.0]
+#    ay = [0.0, -3.0, -5.0, 6.5, 3.0, 5.0, -2.0]
     
-    goal = [ax[-1], ay[-3]]
+#    ax = [0.0, 12.0, 5.0, 0.0, -5.0, -12.0, 0.0]
+#    ay = [0.0, 15.0, 20.0, 15.0, 20.0, 15.0, 0.0]
+    
+#    ax = [0.0, 10.0, 15.0, 20.0, 30.0]
+#    ay = [0.0,  2.0, 10.0, 18.0, 20.0]
+    
+    
+    ax = [0.0,  1.0, 1.5,  2.0, 3.0]
+    ay = [0.0, 0.05, 0.1, 0.15, 0.2]
+    
+    goal = [ax[-1], ay[-1]]
 
     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
         ax, ay, ds=0.1)
-    target_speed = 7.2 / 3.6  # simulation parameter km/h -> m/s
+    target_speed = 0.5  # simulation parameter km/h -> m/s
 
     sp = calc_speed_profile(cx, cy, cyaw, target_speed)
 
-    t, x, y, yaw, v = closed_loop_prediction(cx, cy, cyaw, ck, sp, goal)
+    t, x, y, yaw, v, delta = closed_loop_prediction(cx, cy, cyaw, ck, sp, goal)
 
     if show_animation:  # pragma: no cover
         plt.close()
@@ -351,6 +453,13 @@ def main():
         plt.xlabel("line length[m]")
         plt.ylabel("curvature [1/m]")
 
+        plt.subplots(1)
+        plt.plot(x, delta, "-g", label="delta")
+        plt.grid(True)
+        plt.legend()
+        plt.xlabel("line length[m]")
+        plt.ylabel("curvature [1/m]")
+        
         plt.show()
 
 
