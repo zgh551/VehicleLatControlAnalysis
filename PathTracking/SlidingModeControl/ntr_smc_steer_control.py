@@ -230,6 +230,24 @@ def smc_steering_control_rote(state, cx, cy, cyaw, ck):
 
     return delta_c,ind
 
+def stanley_control(state, cx, cy, cyaw, ck, preind):
+    
+    front_x = state.x + L*np.cos(state.yaw)
+    front_y = state.y + L*np.sin(state.yaw)
+    
+    
+    front_state = State(x=front_x, y= front_y, yaw= state.yaw, v=state.v)
+    ind, e = calc_nearest_index(front_state, cx, cy, cyaw)
+    
+    v = state.v
+    th_e = -pi_2_pi(state.yaw - cyaw[ind])
+    
+    if v ==0 :
+        return 0,ind
+    delta =  th_e + np.arctan(-0.2*e/v)
+
+    return delta, ind
+
 def rear_wheel_feedback_control(state, cx, cy, cyaw, ck, preind):
     ind, e = calc_nearest_index(state, cx, cy, cyaw)
 
@@ -247,6 +265,7 @@ def rear_wheel_feedback_control(state, cx, cy, cyaw, ck, preind):
     #  print(k, v, e, th_e, omega, delta)
 
     return delta, ind
+
 
 def lqr_steering_control(state, cx, cy, cyaw, ck, pe, pth_e):
     ind, e = calc_nearest_index(state, cx, cy, cyaw)
@@ -329,7 +348,10 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
 #        dl, target_ind = smc_steering_control_rote(state, cx, cy, cyaw, ck)
 #        dl, target_ind = smc_steering_control(state, cx, cy, cyaw, ck)
 
-        dl, target_ind = rear_wheel_feedback_control(state, cx, cy, cyaw, ck,0)
+#        dl, target_ind = rear_wheel_feedback_control(state, cx, cy, cyaw, ck,0)
+        
+        dl, target_ind = stanley_control(state, cx, cy, cyaw, ck,0)
+        
         
         ai = PIDControl(speed_profile[target_ind], state.v)
         state = update(state, ai, dl)
@@ -398,8 +420,8 @@ def calc_speed_profile(cx, cy, cyaw, target_speed):
 
 def main():
     print("LQR steering control tracking start!!")
-#    ax = [0.0, 6.0, 12.5, 28.0, 37.5, 46.0, 58.0]
-#    ay = [0.0, -5.0, 6.0, -3.5, 8.0, -3.0, 5.0]
+    ax = [0.0, 6.0, 12.5, 28.0, 37.5, 46.0, 58.0]
+    ay = [0.0, -5.0, 6.0, -3.5, 8.0, -3.0, 5.0]
     
 #    ax = [0.0,  6.0, 12.5, 10.0, 7.5, 3.0, -1.0]
 #    ay = [0.0, -3.0, -5.0, 6.5, 3.0, 5.0, -2.0]
@@ -414,8 +436,8 @@ def main():
 #    ay = [0.0,  2.0, 10.0, 18.0, 20.0]
     
     
-    ax = [0.0,  1.0, 1.5,  2.0, 3.0]
-    ay = [0.0, 0.05, 0.1, 0.15, 0.2]
+#    ax = [0.0,  1.0, 1.5,  2.0, 3.0]
+#    ay = [0.0, 0.05, 0.1, 0.15, 0.2]
     
     goal = [ax[-1], ay[-1]]
 
