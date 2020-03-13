@@ -50,17 +50,17 @@ def Circle_Target_Line(index):
     return radius*np.cos(index + np.pi*0.5),(radius*np.sin(index + np.pi*0.5) - radius)
 
 # 产生曲线数据集
-for i in np.arange(0,simulation_time*v_ref+3,0.05):
-    x,y = COS_Target_Line(i)
-    target_curvature_sets.x.append(x)
-    target_curvature_sets.y.append(y)
-    target_curvature_sets.v.append(v_ref)
-    
-#for i in np.arange(0,-simulation_time*v_ref/radius,-0.05):
-#    x,y = Circle_Target_Line(i)
+#for i in np.arange(0,simulation_time*v_ref+3,0.05):
+#    x,y = COS_Target_Line(i)
 #    target_curvature_sets.x.append(x)
-#    target_curvature_sets.y.append(-y)
+#    target_curvature_sets.y.append(y)
 #    target_curvature_sets.v.append(v_ref)
+    
+for i in np.arange(0,-(simulation_time*v_ref + 3)/radius,-0.05):
+    x,y = Circle_Target_Line(i)
+    target_curvature_sets.x.append(x)
+    target_curvature_sets.y.append(-y)
+    target_curvature_sets.v.append(v_ref)
 
 # 求取目标曲线的斜率
 for i in range(len(target_curvature_sets.x)):
@@ -208,6 +208,17 @@ T = np.linspace(0,simulation_time,2000)
 tout, yout = ct.input_output_response(LatRearWheelFeedbackControl, T, [v_ref*np.ones(len(T))],X0=[init_x,init_y,init_yaw])
 
  
+err_curvature = []
+for i in range(len(tout)):
+    ex = [yout[0][i] - icx for icx in target_curvature_sets.x]
+    ey = [yout[1][i] - icy for icy in target_curvature_sets.y]
+    
+    d = [idx ** 2 + idy ** 2 for (idx, idy) in zip(ex, ey)]
+    mind = min(d)        
+    index = d.index(mind)
+    
+    err_curvature.append(np.sqrt(mind))
+ 
 plt.figure()
 plt.title('Tracking')
 
@@ -223,8 +234,8 @@ plt.subplot(2,1,2)
 plt.grid()
 plt.title('Yaw Track')
 plt.xlabel('x[m]')
-plt.ylabel('angle[rad]')
-plt.plot(yout[0],yout[2],label="yaw")
+plt.ylabel('err[m]')
+plt.plot(err_curvature,label="err")
 plt.legend()
 
 plt.figure()
@@ -233,6 +244,7 @@ plt.title('Yaw angle')
 plt.xlabel('x[m]')
 plt.ylabel('psi[rad]')
 plt.plot(tout,yout[2])
+#plt.plot(tout,yout[4])
 
 plt.figure()
 plt.grid()
