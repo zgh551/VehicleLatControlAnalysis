@@ -10,13 +10,14 @@ import control as ct
 import matplotlib.pyplot as plt
 
 simulation_time = 40
+simulation_sample = simulation_time*1000/20
 
 # steering control parameter
 K_yaw = 1.0
-K_e = 1.5
+K_e = 3.0
 
 # reference velocity and the target steering delta angle 
-v_ref = 1
+v_ref = -0.5
 
 # vehicle init position
 init_x = 0.0
@@ -46,22 +47,22 @@ coefficient_a = 0.4
 def COS_Target_Line(index):
     return index,np.cos(coefficient_a*index) - 1
 
-radius = 10
+radius = 6
 def Circle_Target_Line(index):
     return radius*np.cos(index + np.pi*0.5),(radius*np.sin(index + np.pi*0.5) - radius)
 
 # 产生曲线数据集
-#for i in np.arange(0,simulation_time*v_ref,0.05):
-#    x,y = COS_Target_Line(i)
+for i in np.arange(0,simulation_time*v_ref,-0.05):
+    x,y = COS_Target_Line(i)
+    target_curvature_sets.x.append(x)
+    target_curvature_sets.y.append(y)
+    target_curvature_sets.v.append(v_ref)
+    
+#for i in np.arange(0,-(simulation_time + 5)*v_ref/radius,0.05):
+#    x,y = Circle_Target_Line(i)
 #    target_curvature_sets.x.append(x)
 #    target_curvature_sets.y.append(y)
 #    target_curvature_sets.v.append(v_ref)
-    
-for i in np.arange(0,-simulation_time*v_ref/radius,-0.05):
-    x,y = Circle_Target_Line(i)
-    target_curvature_sets.x.append(x)
-    target_curvature_sets.y.append(-y)
-    target_curvature_sets.v.append(v_ref)
 
 # 求取目标曲线的斜率
 for i in range(len(target_curvature_sets.x)):
@@ -101,7 +102,7 @@ def target_output(t, x, u, params):
 
     index = d.index(mind)
     
-    return np.array([target_curvature_sets.x[index],target_curvature_sets.y[index],target_curvature_sets.yaw[index],target_curvature_sets.k[index],u[0]])
+    return np.array([target_curvature_sets.x[index],target_curvature_sets.y[index],target_curvature_sets.yaw[index]+ np.pi,-target_curvature_sets.k[index],u[0]])
 
 # Define the trajectory generator as an input/output system
 target = ct.NonlinearIOSystem(
@@ -120,17 +121,24 @@ target = ct.NonlinearIOSystem(
 def control_output(t, x, u, params):
     l = params.get('wheelbase', 2.6)
     
-    err_crs = np.cos(u[3])*u[1] - np.sin(u[3])*u[0]
+    yaw_ref = pi_2_pi(u[3])
+    
+    err_crs = np.cos(yaw_ref)*u[1] - np.sin(yaw_ref)*u[0]
+    
     err_yaw = pi_2_pi(u[2])
     
-    yaw_omega = u[5] * u[4] * np.cos(err_yaw)/(1.0 + u[4]*err_crs) \
-              - K_e  * u[5] * np.sin(err_yaw) * err_crs / err_yaw \
-              - K_yaw * np.fabs(u[5]) * err_yaw
+    v_r = u[5]
+    
+    k = u[4]
+    
+    yaw_omega = v_r   * k   *   np.cos(err_yaw) / (1.0 - k*err_crs) \
+              - K_e   * v_r *   np.sin(err_yaw) *  err_crs / err_yaw \
+              - K_yaw * np.fabs(v_r) * err_yaw
 
     if yaw_omega == 0.0 or  err_yaw == 0.0:
         return ([0.0,u[5]])
     
-    delta_ctl = np.arctan2(l*yaw_omega/u[5],1.0) 
+    delta_ctl = np.arctan2(l*yaw_omega/v_r,1.0) 
     
     return  np.array([delta_ctl, u[5]])
 
@@ -208,10 +216,20 @@ LatRearWheelFeedbackControl = ct.InterconnectedSystem(
 # Input Output Response
 ###############################################################################
 # time of response
-T = np.linspace(0,simulation_time,2000)
+T = np.linspace(0,simulation_time,simulation_sample)
 # the response
 tout, yout = ct.input_output_response(LatRearWheelFeedbackControl, T, [v_ref*np.ones(len(T))],X0=[init_x,init_y,init_yaw])
 
+err_curvature = []
+for i in range(len(tout)):
+    ex = [yout[0][i] - icx for icx in target_curvature_sets.x]
+    ey = [yout[1][i] - icy for icy in target_curvature_sets.y]
+    
+    d = [idx ** 2 + idy ** 2 for (idx, idy) in zip(ex, ey)]
+    mind = min(d)        
+    index = d.index(mind)
+    
+    err_curvature.append(np.sqrt(mind))
  
 plt.figure()
 plt.title('Tracking')
@@ -228,9 +246,8 @@ plt.subplot(2,1,2)
 plt.grid()
 plt.title('Yaw Track')
 plt.xlabel('x[m]')
-plt.ylabel('angle[rad]')
-plt.plot(yout[0],yout[2],label="yaw")
-plt.plot(yout[0],yout[4],label="yaw_ref")
+plt.ylabel('err[m]')
+plt.plot(err_curvature,label="err")
 plt.legend()
 
 plt.figure()
@@ -239,6 +256,7 @@ plt.title('Yaw angle')
 plt.xlabel('x[m]')
 plt.ylabel('psi[rad]')
 plt.plot(tout,yout[2])
+plt.plot(tout,yout[4])
 
 plt.figure()
 plt.grid()
@@ -250,6 +268,7 @@ plt.plot(tout,yout[3]*16*57.3)
 plt.figure()
 plt.title('curvature')
 plt.xlabel('x[m]')
-plt.plot(target_curvature_sets.y)
-plt.plot(target_curvature_sets.yaw)
-plt.plot(target_curvature_sets.k)
+plt.grid()
+plt.plot(target_curvature_sets.x,target_curvature_sets.y)
+plt.plot(target_curvature_sets.x,target_curvature_sets.yaw)
+plt.plot(target_curvature_sets.x,target_curvature_sets.k)
