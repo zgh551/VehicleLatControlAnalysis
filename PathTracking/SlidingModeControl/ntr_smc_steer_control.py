@@ -37,11 +37,20 @@ KE = 1.0
 
 # LQR parameter
 Q = np.eye(4)
-R = np.eye(1)
+R = 2*np.eye(1)
+
+# 车辆参数
+M   = 1573.0 #(kg) 总质量 mass
+I_z = 2873.0 # (kg/m^2) 绕Z轴的转动惯量 
+l_f = 1.10  # (m)
+l_r = 1.58  # (m)
+C_alpha_f = 20000.0 #(N/rad) 前轮总侧偏刚度
+C_alpha_r = 20000.0 #(N/rad) 后轮总侧偏刚度
+#V_x = 30.0 # (m/s)
 
 # parameters
 dt = 0.1  # time tick[s]
-L = 2.8  # Wheel base of the vehicle [m]
+L = l_f+l_r  # Wheel base of the vehicle [m]
 max_steer = np.deg2rad(45.0)  # maximum steering angle[rad]
 
 show_animation = True
@@ -280,6 +289,7 @@ def lqr_steering_control(state, cx, cy, cyaw, ck, pe, pth_e):
     A[1, 2] = v
     A[2, 2] = 1.0
     A[2, 3] = dt
+    A[3, 0] = -v * k**2
     # print(A)
 
     B = np.zeros((4, 1))
@@ -300,7 +310,96 @@ def lqr_steering_control(state, cx, cy, cyaw, ck, pe, pth_e):
 
     return delta, ind, e, th_e
 
+def lqr_steering_control_test(state, cx, cy, cyaw, ck, pe, pth_e):
+    ind, e = calc_nearest_index(state, cx, cy, cyaw)
 
+    k = ck[ind]
+    v = state.v
+    th_e = pi_2_pi(state.yaw - cyaw[ind])
+
+    A = np.zeros((2, 2))
+#    A[0, 0] = 1.0
+    A[0, 1] = v
+    A[1, 0] = -v * k**2
+#    A[1, 1] = 1.0
+
+#    A[3, 0] = -v * k**2
+    # print(A)
+
+    Ad = la.inv(np.identity(2) - dt * 0.5 * A) @ (np.identity(2) + dt * 0.5 * A)
+
+    B = np.zeros((2, 1))
+    B[1, 0] = dt*v / L
+
+    K, _, _ = dlqr(Ad, B, Q, R)
+    x = np.zeros((2, 1))
+
+    x[0, 0] = e
+#    x[1, 0] = (e - pe) / dt
+    x[1, 0] = th_e
+#    x[3, 0] = (th_e - pth_e) / dt
+
+    ff = math.atan2(L * k, 1)
+    fb = pi_2_pi((-K @ x)[0, 0])
+
+    delta = ff + fb
+
+    return delta, ind, e, th_e
+
+
+def lqr_steering_control_dynamic(state, cx, cy, cyaw, ck, pe, pth_e):
+    ind, e = calc_nearest_index(state, cx, cy, cyaw)
+    
+#    crs_e = np.cos(cyaw[ind])*(state.y - cy[ind]) - np.sin(cyaw[ind])*(state.x - cx[ind])
+
+    k = ck[ind]
+    
+    if state.v == 0:
+        V_x = 0.01
+    else:
+        V_x = state.v
+    th_e = pi_2_pi(state.yaw - cyaw[ind])
+
+    A  = np.zeros((4, 4))
+    Ad = np.zeros((4, 4))
+    
+    A[0, 1] = 1.0
+    A[1, 1] = -2.*(C_alpha_f + C_alpha_r)/(M*V_x)
+    A[1, 2] =  2.*(C_alpha_f + C_alpha_r)/M
+    A[1, 3] = -2.*(C_alpha_f*l_f - C_alpha_r*l_r)/(M*V_x)
+    A[2, 3] = 1.0
+    A[3, 1] = -2.*(C_alpha_f*l_f - C_alpha_r*l_r)/(I_z*V_x)
+    A[3, 2] =  2.*(C_alpha_f*l_f - C_alpha_r*l_r)/I_z
+    A[3, 3] = -2.*(C_alpha_f*l_f**2 + C_alpha_r*l_r**2)/(I_z*V_x)
+    
+#    print(A)
+    
+    Ad = la.inv(np.identity(4) - dt * 0.5 * A) @ (np.identity(4) + dt * 0.5 * A)
+#    Ad = np.identity(4) + A*dt
+#    print(Ad)
+
+    B  = np.zeros((4, 1))
+    Bd = np.zeros((4, 1))
+    
+    B[1, 0] = 1.*C_alpha_f/M
+    B[3, 0] = 1.*C_alpha_f*l_f/I_z
+    
+    Bd = B * dt
+
+    K, _, _ = dlqr(Ad, Bd, Q, R)
+    x = np.zeros((4, 1))
+
+    x[0, 0] =  e
+    x[1, 0] = (e - pe) / dt
+    x[1, 0] = th_e
+    x[3, 0] = (th_e - pth_e) / dt
+
+    ff = math.atan2(L * k, 1)
+    fb = pi_2_pi((-K @ x)[0, 0])
+
+    delta = ff + fb
+
+    return delta, ind, e, th_e
 
 
 def calc_nearest_index(state, cx, cy, cyaw):
@@ -327,7 +426,7 @@ def calc_nearest_index(state, cx, cy, cyaw):
 
 def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
     T = 500.0  # max simulation time
-    goal_dis = 0.1
+    goal_dis = 0.2
     stop_speed = 0.05
 
     state = State(x=-0.0, y= 0.0, yaw=0.0, v=0.0)
@@ -343,14 +442,17 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
     e, e_th = 0.0, 0.0
 
     while T >= time:
+        
+        dl, target_ind, e, e_th = lqr_steering_control_dynamic(state, cx, cy, cyaw, ck, e, e_th)
 #        dl, target_ind, e, e_th = lqr_steering_control(state, cx, cy, cyaw, ck, e, e_th)
+#        dl, target_ind, e, e_th = lqr_steering_control_test(state, cx, cy, cyaw, ck, e, e_th)
         
 #        dl, target_ind = smc_steering_control_rote(state, cx, cy, cyaw, ck)
 #        dl, target_ind = smc_steering_control(state, cx, cy, cyaw, ck)
 
 #        dl, target_ind = rear_wheel_feedback_control(state, cx, cy, cyaw, ck,0)
         
-        dl, target_ind = stanley_control(state, cx, cy, cyaw, ck,0)
+#        dl, target_ind = stanley_control(state, cx, cy, cyaw, ck,0)
         
         
         ai = PIDControl(speed_profile[target_ind], state.v)
@@ -420,8 +522,8 @@ def calc_speed_profile(cx, cy, cyaw, target_speed):
 
 def main():
     print("LQR steering control tracking start!!")
-    ax = [0.0, 6.0, 12.5, 28.0, 37.5, 46.0, 58.0]
-    ay = [0.0, -5.0, 6.0, -3.5, 8.0, -3.0, 5.0]
+#    ax = [0.0, 6.0, 12.5, 28.0, 37.5, 46.0, 58.0]
+#    ay = [0.0, -5.0, 6.0, -3.5, 8.0, -3.0, 5.0]
     
 #    ax = [0.0,  6.0, 12.5, 10.0, 7.5, 3.0, -1.0]
 #    ay = [0.0, -3.0, -5.0, 6.5, 3.0, 5.0, -2.0]
@@ -432,8 +534,8 @@ def main():
 #    ax = [0.0, 12.0, 5.0, 0.0, -5.0, -12.0, 0.0]
 #    ay = [0.0, 15.0, 20.0, 15.0, 20.0, 15.0, 0.0]
     
-#    ax = [0.0, 10.0, 15.0, 20.0, 30.0]
-#    ay = [0.0,  2.0, 10.0, 18.0, 20.0]
+    ax = [0.0, 10.0, 15.0, 20.0, 60.0]
+    ay = [0.0,  2.0, 10.0, 18.0, 20.0]
     
     
 #    ax = [0.0,  1.0, 1.5,  2.0, 3.0]
@@ -443,7 +545,7 @@ def main():
 
     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
         ax, ay, ds=0.1)
-    target_speed = 0.5  # simulation parameter km/h -> m/s
+    target_speed = 7  # simulation parameter km/h -> m/s
 
     sp = calc_speed_profile(cx, cy, cyaw, target_speed)
 
