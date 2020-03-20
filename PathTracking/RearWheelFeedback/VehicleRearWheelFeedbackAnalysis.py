@@ -14,7 +14,7 @@ simulation_sample = simulation_time*1000/20
 
 # steering control parameter
 K_yaw = 1.0
-K_e = 3.0
+K_e = 2.0
 
 # reference velocity and the target steering delta angle 
 v_ref = -0.5
