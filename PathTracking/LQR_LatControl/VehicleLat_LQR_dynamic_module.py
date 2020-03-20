@@ -19,7 +19,7 @@ K_e = 1.5
 
 # LQR parameter
 Q = 2*np.eye(2)
-R = 4*np.eye(1)
+R = 2*np.eye(1)
 # reference velocity and the target steering delta angle 
 v_ref = 1
 
