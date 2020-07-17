@@ -310,6 +310,51 @@ def lqr_steering_control(state, cx, cy, cyaw, ck, pe, pth_e):
 
     return delta, ind, e, th_e
 
+def lqr_steering_control_Kinematic(state, cx, cy, cyaw, ck, pe, pth_e, pv):
+    ind, e = calc_nearest_index(state, cx, cy, cyaw)
+
+    k = ck[ind]
+    v = state.v
+    th_e = pi_2_pi(state.yaw - cyaw[ind])
+
+    A = np.zeros((4, 4))
+    Ad = np.zeros((4, 4))
+    
+#    A[0, 1] = 1.0
+#    A[1, 2] = v
+#    A[2, 3] = 1.0
+#    A[3, 0] = -v * k**2
+    # print(A)
+#    Ad = la.inv(np.identity(4) - dt * 0.5 * A) @ (np.identity(4) + dt * 0.5 * A)
+#    Ad = np.identity(4) + A*dt
+    Ad[0,0] = 1.0
+    Ad[0,1] = dt
+    Ad[1,2] = v
+    Ad[2,2] = 1.0
+    Ad[2,3] = dt
+    Ad[3,0] = -v * k**2
+
+    B = np.zeros((4, 1))
+    Bd = np.zeros((4, 1))
+    
+    B[3, 0] = v / L
+    
+    K, _, _ = dlqr(Ad, B, Q, R)
+    x = np.zeros((4, 1))
+
+    x[0, 0] = e
+    x[1, 0] = (e - pe) / dt
+    x[2, 0] = th_e
+    x[3, 0] = (th_e - pth_e) / dt
+
+    ff = L * k
+    fb = pi_2_pi((-K @ x)[0, 0])
+
+    delta = ff + fb
+
+    return delta, ind, e, th_e, v
+
+
 def lqr_steering_control_test(state, cx, cy, cyaw, ck, pe, pth_e):
     ind, e = calc_nearest_index(state, cx, cy, cyaw)
 
@@ -439,11 +484,12 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
     t = [0.0]
     delta = [0.0]
     
-    e, e_th = 0.0, 0.0
+    e, e_th ,e_v  = 0.0, 0.0, 0.0
 
     while T >= time:
         
-        dl, target_ind, e, e_th = lqr_steering_control_dynamic(state, cx, cy, cyaw, ck, e, e_th)
+        dl, target_ind, e, e_th, e_v = lqr_steering_control_Kinematic(state, cx, cy, cyaw, ck, e, e_th, e_v)
+#        dl, target_ind, e, e_th = lqr_steering_control_dynamic(state, cx, cy, cyaw, ck, e, e_th)
 #        dl, target_ind, e, e_th = lqr_steering_control(state, cx, cy, cyaw, ck, e, e_th)
 #        dl, target_ind, e, e_th = lqr_steering_control_test(state, cx, cy, cyaw, ck, e, e_th)
         
@@ -475,7 +521,7 @@ def closed_loop_prediction(cx, cy, cyaw, ck, speed_profile, goal):
         yaw.append(state.yaw)
         v.append(state.v)
         t.append(time)
-        delta.append(dl)
+        delta.append(dl*16.0*57.3)
         
         if target_ind % 1 == 0 and show_animation:
             plt.cla()

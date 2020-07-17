@@ -52,7 +52,7 @@ def Circle_Target_Line(index):
     return radius*np.cos(index + np.pi*0.5),(radius*np.sin(index + np.pi*0.5) - radius)
 
 # 产生曲线数据集
-for i in np.arange(0,simulation_time*v_ref,-0.05):
+for i in np.arange(0,simulation_time*v_ref,-0.03):
     x,y = COS_Target_Line(i)
     target_curvature_sets.x.append(x)
     target_curvature_sets.y.append(y)
@@ -136,11 +136,11 @@ def control_output(t, x, u, params):
               - K_yaw * np.fabs(v_r) * err_yaw
 
     if yaw_omega == 0.0 or  err_yaw == 0.0:
-        return ([0.0,u[5]])
+        return ([0.0,v_r])
     
     delta_ctl = np.arctan2(l*yaw_omega/v_r,1.0) 
     
-    return  np.array([delta_ctl, u[5]])
+    return  np.array([delta_ctl, v_r])
 
 # Define the controller as an input/output system
 controller = ct.NonlinearIOSystem(
