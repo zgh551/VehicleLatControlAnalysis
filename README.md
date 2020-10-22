@@ -1,5 +1,5 @@
 # VehicleLatControlAnalysis
-本仓库使用滑模控制方法实现车辆横向控制
+包含车辆横向控制相关算法的分析
 
 ## PathTracking
 ###  非时间参考路径跟踪方法
