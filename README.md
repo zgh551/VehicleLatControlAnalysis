@@ -1,7 +1,12 @@
 # VehicleLatControlAnalysis
-包含车辆横向控制相关算法的分析
+项目包含车辆横向控制相关算法的分析.
 
-## PathTracking
+## 依赖库
+- numpy
+- control
+- matplotlib
+
+## 路径跟踪算法
 ###  非时间参考路径跟踪方法
 基于非时间的参考的路径跟踪方法[Vehicle SMC Analysis (none-time reference)]最早应用于机器人的路径跟踪系统，通过引入非时间参考量代替时间参考量，解决传统路径跟踪方法中将期望轨迹视为时间函数的问题。
 该方法选择移动机器人实际路径在某参考系下的x 轴投影作为非时间参考量，
