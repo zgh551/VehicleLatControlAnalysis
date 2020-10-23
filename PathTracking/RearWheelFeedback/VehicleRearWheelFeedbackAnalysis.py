@@ -10,7 +10,8 @@ import control as ct
 import matplotlib.pyplot as plt
 
 simulation_time = 40
-simulation_sample = simulation_time*1000/20
+simulation_sample = 2000
+#simulation_time*1000/20
 
 # steering control parameter
 K_yaw = 1.0
@@ -131,11 +132,14 @@ def control_output(t, x, u, params):
     
     k = u[4]
     
+    if err_yaw == 0.0:
+        return ([0.0,v_r])
+
     yaw_omega = v_r   * k   *   np.cos(err_yaw) / (1.0 - k*err_crs) \
               - K_e   * v_r *   np.sin(err_yaw) *  err_crs / err_yaw \
               - K_yaw * np.fabs(v_r) * err_yaw
 
-    if yaw_omega == 0.0 or  err_yaw == 0.0:
+    if yaw_omega == 0.0:
         return ([0.0,v_r])
     
     delta_ctl = np.arctan2(l*yaw_omega/v_r,1.0) 
@@ -272,3 +276,5 @@ plt.grid()
 plt.plot(target_curvature_sets.x,target_curvature_sets.y)
 plt.plot(target_curvature_sets.x,target_curvature_sets.yaw)
 plt.plot(target_curvature_sets.x,target_curvature_sets.k)
+
+plt.show()
