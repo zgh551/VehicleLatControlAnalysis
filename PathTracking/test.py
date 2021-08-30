@@ -2,7 +2,7 @@
 """
 Created on Wed Mar 11 11:42:24 2020
 
-@author: zhuguohua
+@author: Henry Zhu
 """
 import numpy as np
 import control as ct
